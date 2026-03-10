@@ -7,9 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, updateDoc, increment, collection, onSnapshot, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, increment, collection, onSnapshot, query, orderBy, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // あなたのFirebase設定を反映しました
         const firebaseConfig = {
             apiKey: "AIzaSyC1rcomHIoitizq2NSRMsDwgDyQYksYANk",
             authDomain: "unite-score-275c6.firebaseapp.com",
@@ -27,38 +26,38 @@
         window.join = async (team) => {
             const name = document.getElementById('userName').value.trim();
             if(!name) return alert("名前を入力してね！");
-            
-            // ユーザーデータを保存（既存なら上書きせずチームだけ更新も可能ですが、ここでは簡易的に新規・更新対応）
-            await setDoc(doc(db, "users", name), { 
-                name: name, 
-                team: team, 
-                score: increment(0) // 初回参加時は0、既存なら維持
-            }, { merge: true });
-            
+            await setDoc(doc(db, "users", name), { name: name, team: team, score: increment(0) }, { merge: true });
             document.getElementById('status').innerText = `【参加中】${name}：${team === 'blue' ? '青' : '赤'}チーム`;
-            localStorage.setItem('myUniteName', name); // ブラウザに名前を記憶
+            localStorage.setItem('myUniteName', name);
         };
 
         // --- 試合終了・加点処理 ---
         window.finishMatch = async (winner) => {
             if(!confirm(winner + "チームの勝利として全員に加点しますか？")) return;
-            
             const querySnapshot = await getDocs(collection(db, "users"));
-            
-            // 全ユーザーに対してループ処理で加点
-            const promises = querySnapshot.docs.map(userDoc => {
+            const batch = writeBatch(db);
+            querySnapshot.docs.forEach(userDoc => {
                 const userData = userDoc.data();
                 const points = (userData.team === winner) ? 5 : 2;
-                return updateDoc(doc(db, "users", userDoc.id), {
-                    score: increment(points)
-                });
+                batch.update(doc(db, "users", userDoc.id), { score: increment(points) });
             });
-
-            await Promise.all(promises);
-            alert("全員のスコアを更新しました！");
+            await batch.commit();
+            alert("スコアを更新しました！");
         };
 
-        // --- ランキング表示（リアルタイム） ---
+        // --- スコアリセット処理 (NEW!) ---
+        window.resetScores = async () => {
+            if(!confirm("【注意】全員のスコアを0リセットします。よろしいですか？")) return;
+            const querySnapshot = await getDocs(collection(db, "users"));
+            const batch = writeBatch(db);
+            querySnapshot.docs.forEach(userDoc => {
+                batch.update(doc(db, "users", userDoc.id), { score: 0 });
+            });
+            await batch.commit();
+            alert("全員のスコアを0にリセットしました！");
+        };
+
+        // --- ランキング表示 ---
         const q = query(collection(db, "users"), orderBy("score", "desc"));
         onSnapshot(q, (snapshot) => {
             const list = document.getElementById('ranking');
@@ -67,18 +66,11 @@
                 const data = doc.data();
                 const li = document.createElement('li');
                 li.className = "bg-slate-700 p-3 rounded-lg flex justify-between items-center border-l-4 " + (data.team === 'blue' ? 'border-blue-500' : 'border-red-500');
-                li.innerHTML = `
-                    <div>
-                        <span class="font-bold">${data.name}</span>
-                        <span class="text-xs ml-2 text-gray-400">${data.team === 'blue' ? '青' : '赤'}</span>
-                    </div>
-                    <span class="font-bold text-yellow-400 text-xl">${data.score} <small class="text-xs text-gray-400 text-white">pts</small></span>
-                `;
+                li.innerHTML = `<div><span class="font-bold">${data.name}</span><span class="text-xs ml-2 text-gray-400">${data.team === 'blue' ? '青' : '赤'}</span></div><span class="font-bold text-yellow-400 text-xl">${data.score} <small class="text-xs text-gray-400">pts</small></span>`;
                 list.appendChild(li);
             });
         });
 
-        // ページ読み込み時に名前を復元
         window.onload = () => {
             const savedName = localStorage.getItem('myUniteName');
             if(savedName) document.getElementById('userName').value = savedName;
@@ -87,33 +79,29 @@
 </head>
 <body class="bg-slate-900 text-white p-5 font-sans min-h-screen">
     <div class="max-w-md mx-auto">
-        <h1 class="text-3xl font-black text-center mb-2 text-yellow-500 tracking-tighter italic">UNITE RANKING</h1>
-        <p class="text-center text-gray-400 text-xs mb-8">参加型配信スコア管理ツール</p>
+        <h1 class="text-3xl font-black text-center mb-2 text-yellow-500 tracking-tighter italic text-shadow">UNITE RANKING</h1>
         
         <div class="bg-slate-800 p-6 rounded-2xl shadow-2xl mb-6 border border-slate-700">
-            <label class="block text-xs font-bold text-gray-400 mb-2 uppercase">Your Name</label>
             <input id="userName" type="text" placeholder="トレーナー名" class="w-full p-3 rounded-lg text-black mb-4 font-bold outline-none focus:ring-2 focus:ring-yellow-500">
             <div class="flex gap-3">
-                <button onclick="join('blue')" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black shadow-lg shadow-blue-900/50 transition-all active:scale-95 text-sm">青チームで参加</button>
-                <button onclick="join('red')" class="flex-1 bg-red-600 hover:bg-red-500 py-4 rounded-xl font-black shadow-lg shadow-red-900/50 transition-all active:scale-95 text-sm">赤チームで参加</button>
+                <button onclick="join('blue')" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black text-sm">青チーム参加</button>
+                <button onclick="join('red')" class="flex-1 bg-red-600 hover:bg-red-500 py-4 rounded-xl font-black text-sm">赤チーム参加</button>
             </div>
             <p id="status" class="mt-4 text-center text-yellow-500 font-bold text-sm h-5"></p>
         </div>
 
         <div class="bg-slate-800/50 p-4 rounded-2xl border-2 border-dashed border-slate-700 mb-8">
-            <h2 class="text-center mb-3 text-slate-500 text-[10px] font-black tracking-widest uppercase">Admin Control</h2>
-            <div class="flex gap-2">
-                <button onclick="finishMatch('blue')" class="flex-1 bg-slate-700 hover:bg-blue-900 py-2 rounded-lg text-xs font-bold border border-blue-500/30 transition-colors">青の勝ち(+5/+2)</button>
-                <button onclick="finishMatch('red')" class="flex-1 bg-slate-700 hover:bg-red-900 py-2 rounded-lg text-xs font-bold border border-red-500/30 transition-colors">赤の勝ち(+5/+2)</button>
+            <h2 class="text-center mb-3 text-slate-500 text-[10px] font-black uppercase tracking-widest">Admin Control</h2>
+            <div class="flex gap-2 mb-3">
+                <button onclick="finishMatch('blue')" class="flex-1 bg-slate-700 hover:bg-blue-900 py-2 rounded-lg text-xs font-bold border border-blue-500/30">青の勝ち(+5/+2)</button>
+                <button onclick="finishMatch('red')" class="flex-1 bg-slate-700 hover:bg-red-900 py-2 rounded-lg text-xs font-bold border border-red-500/30">赤の勝ち(+5/+2)</button>
             </div>
+            <button onclick="resetScores()" class="w-full bg-red-900/40 hover:bg-red-600 text-red-400 hover:text-white py-2 rounded-lg text-[10px] font-bold border border-red-900/50 transition-all">全スコアを0にリセット</button>
         </div>
 
         <div>
-            <h2 class="text-lg font-black mb-4 flex items-center gap-2">
-                <span class="bg-yellow-500 text-black px-2 py-0.5 rounded text-sm">RANKING</span>
-            </h2>
-            <ul id="ranking" class="space-y-3">
-                </ul>
+            <h2 class="text-lg font-black mb-4 flex items-center gap-2"><span class="bg-yellow-500 text-black px-2 py-0.5 rounded text-sm">RANKING</span></h2>
+            <ul id="ranking" class="space-y-3"></ul>
         </div>
     </div>
 </body>
