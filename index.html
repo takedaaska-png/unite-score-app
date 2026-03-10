@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UNITE 2-1-2 SECURE MATCHMAKER</title>
+    <title>UNITE 2-1-2 SELECTOR</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -24,7 +24,7 @@
         const ADMIN_PASSWORD = "unite"; 
         const ROLES = ["希望なし", "スピードバランス", "アタック", "サポートタンク"];
 
-        // 共通：パスワード認証関数
+        // 共通：パスワード認証
         const verifyUser = async (name) => {
             const pass = prompt(`${name} さんの4桁パスワードを入力してください`);
             if (!pass) return false;
@@ -55,10 +55,12 @@
             }
         };
 
-        window.cycleRole = async (name, currentRole) => {
+        // --- プルダウン変更時の処理 ---
+        window.changeRole = async (name, newRole) => {
             if (await verifyUser(name)) {
-                const nextRole = ROLES[(ROLES.indexOf(currentRole) + 1) % ROLES.length];
-                await updateDoc(doc(db, "users", name), { role: nextRole });
+                await updateDoc(doc(db, "users", name), { role: newRole });
+            } else {
+                // 認証失敗時は表示を元に戻す（再描画で自動的に戻ります）
             }
         };
 
@@ -110,7 +112,6 @@
             [...s1, ...a1, ...t1].forEach(p => batch.update(doc(db, "users", p.id), { team: "blue" }));
             [...s2, ...a2, ...t2].forEach(p => batch.update(doc(db, "users", p.id), { team: "red" }));
             await batch.commit();
-            alert("マッチング完了！");
         };
 
         window.finishMatch = async (winner) => {
@@ -141,20 +142,30 @@
             snapshot.forEach((doc) => {
                 const data = doc.data();
                 const winRate = data.matches > 0 ? ((data.wins / data.matches) * 100).toFixed(1) : "0.0";
+                
+                // チーム表示用カード
                 const card = `<li class="bg-slate-700 p-2 rounded text-[10px] mb-1 font-bold flex justify-between shadow"><span>${data.name}</span><span class="opacity-40 text-[7px] border border-white/20 px-1 rounded">${data.role}</span></li>`;
                 if(data.team === 'blue') blueList.innerHTML += card;
                 else if(data.team === 'red') redList.innerHTML += card;
                 
+                // ランキング/プレイヤーリスト用行
                 const rankLi = document.createElement('li');
                 rankLi.className = "flex justify-between items-center border-b border-slate-800 py-2";
+                
+                // ロール用プルダウンのHTML生成
+                let roleOptions = ROLES.map(r => `<option value="${r}" ${data.role === r ? 'selected' : ''}>${r}</option>`).join('');
+
                 rankLi.innerHTML = `
                     <div class="flex items-center gap-2">
                         <input type="checkbox" ${data.active ? 'checked' : ''} onchange="toggleActive('${data.name}', ${data.active})" class="w-4 h-4 accent-yellow-500 cursor-pointer">
                         <div>
                             <div class="text-xs font-bold ${data.active ? 'text-white' : 'text-gray-600'}">${data.name}</div>
                             <div class="flex gap-2 items-center">
-                                <button onclick="cycleRole('${data.name}', '${data.role}')" class="text-[7px] border px-1 rounded border-slate-600 text-slate-400 bg-slate-900/50 hover:text-white">${data.role} 🔒</button>
-                                <span class="text-[7px] text-slate-500 font-bold uppercase">Win: ${winRate}%</span>
+                                <select onchange="changeRole('${data.name}', this.value)" 
+                                        class="text-[8px] bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-slate-300 focus:outline-none focus:border-yellow-500">
+                                    ${roleOptions}
+                                </select>
+                                <span class="text-[7px] text-slate-500 font-bold">Win: ${winRate}%</span>
                             </div>
                         </div>
                     </div>
@@ -166,44 +177,47 @@
     </script>
 </head>
 <body class="bg-slate-900 text-white p-4 font-sans max-w-md mx-auto min-h-screen">
-    <h1 class="text-2xl font-black text-center mb-4 text-yellow-500 italic tracking-tighter">UNITE SECURE 2-1-2</h1>
+    <header class="text-center mb-4">
+        <h1 class="text-2xl font-black text-yellow-500 italic tracking-tighter">UNITE HUB 2-1-2</h1>
+        <p class="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1 italic">Role Selection & Secure Access</p>
+    </header>
     
     <div class="bg-slate-800 p-4 rounded-xl mb-4 border border-slate-700 shadow-xl">
         <div class="grid grid-cols-2 gap-2 mb-2">
             <input id="userName" type="text" placeholder="名前" class="p-2 rounded text-black font-bold outline-none text-xs">
             <input id="userPass" type="password" maxlength="4" placeholder="4桁パス" class="p-2 rounded text-black font-bold outline-none text-xs">
         </div>
-        <select id="userRole" class="w-full p-2 rounded text-black text-xs font-bold bg-white mb-2">
+        <select id="userRole" class="w-full p-2 rounded text-black text-xs font-bold bg-white mb-2 outline-none">
             <option value="希望なし">希望なし</option>
             <option value="スピードバランス">スピードバランス</option>
             <option value="アタック">アタック</option>
             <option value="サポートタンク">サポートタンク</option>
         </select>
-        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg">エントリー</button>
+        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg uppercase">Entry Match</button>
         <p id="status" class="mt-2 text-center text-[10px] text-yellow-500 h-4 font-bold"></p>
     </div>
 
     <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700">
-        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200">2-1-2 バランスマッチ作成 (Admin)</button>
+        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200">2-1-2 バランスマッチ作成</button>
         <div class="flex gap-2">
             <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded font-bold text-[9px] shadow-lg">BLUE WIN</button>
             <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded font-bold text-[9px] shadow-lg">RED WIN</button>
         </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-4 mb-6">
+    <div class="grid grid-cols-2 gap-3 mb-6">
         <div class="bg-blue-900/40 p-2 rounded-lg border border-blue-500/50 min-h-[140px]">
-            <h2 class="text-blue-400 font-black text-[9px] mb-2 text-center italic border-b border-blue-500/30 pb-1 uppercase tracking-widest">Team Blue</h2>
+            <h2 class="text-blue-400 font-black text-[9px] mb-2 text-center italic border-b border-blue-500/30 pb-1 uppercase tracking-tighter">Team Blue (2-1-2)</h2>
             <ul id="blueTeam"></ul>
         </div>
         <div class="bg-red-900/40 p-2 rounded-lg border border-red-500/50 min-h-[140px]">
-            <h2 class="text-red-400 font-black text-[9px] mb-2 text-center italic border-b border-red-500/30 pb-1 uppercase tracking-widest">Team Red</h2>
+            <h2 class="text-red-400 font-black text-[9px] mb-2 text-center italic border-b border-red-500/30 pb-1 uppercase tracking-tighter">Team Red (2-1-2)</h2>
             <ul id="redTeam"></ul>
         </div>
     </div>
 
     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
-        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic">Player List / Private Controls</h2>
+        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic border-b border-slate-700 pb-2">Player Stats & Role Settings</h2>
         <ul id="ranking" class="space-y-1"></ul>
     </div>
 </body>
