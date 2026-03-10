@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UNITE PRO HUB + SMART FEEDBACK</title>
+    <title>UNITE PRO HUB - FIX</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -24,10 +24,11 @@
         const ADMIN_PASSWORD = "unite"; 
         const ROLES = ["希望なし", "スピードバランス", "アタック", "サポートタンク"];
 
-        // --- 状態管理用オブジェクト ---
+        // --- グローバル変数 ---
         let feedbackCounts = {};
+        let targetPlayer = ""; // ここが漏れていました
 
-        // --- 認証系 ---
+        // --- 共通関数 ---
         const checkAdmin = () => prompt("管理者パスワード") === ADMIN_PASSWORD;
         const verifyUser = async (name) => {
             const pass = prompt(`${name} さんの4桁パスワード`);
@@ -35,7 +36,7 @@
             return userSnap.exists() && userSnap.data().password === pass;
         };
 
-        // --- エントリー・基本操作 ---
+        // --- エントリー ---
         window.joinEntry = async () => {
             const name = document.getElementById('userName').value.trim();
             const role = document.getElementById('userRole').value;
@@ -45,7 +46,6 @@
                 name, role, password: pass, score: increment(0), wins: increment(0), matches: increment(0),
                 team: "waiting", active: true, past_teammates: [] 
             }, { merge: true });
-            localStorage.setItem('myUniteName', name);
         };
 
         window.toggleActive = async (name, currentStatus) => await updateDoc(doc(db, "users", name), { active: !currentStatus });
@@ -53,7 +53,7 @@
             if (await verifyUser(name)) await updateDoc(doc(db, "users", name), { role: newRole });
         };
 
-        // --- マッチング (2-1-2固定) ---
+        // --- マッチング (2-1-2) ---
         window.makeMatch = async () => {
             if(!checkAdmin()) return;
             const snap = await getDocs(collection(db, "users"));
@@ -67,12 +67,12 @@
             while(selS.length < 4 && remW.length > 0) selS.push(remW.shift());
             while(selA.length < 2 && remW.length > 0) selA.push(remW.shift());
             while(selT.length < 4 && remW.length > 0) selT.push(remW.shift());
-            if(selS.length < 4 || selA.length < 2 || selT.length < 4) return alert("2-1-2構成の人数が足りません");
+            if(selS.length < 4 || selA.length < 2 || selT.length < 4) return alert("人数不足");
             const getWR = p => p.matches > 0 ? p.wins / p.matches : 0.5;
             const split = (pool, size) => {
                 pool.sort((a, b) => getWR(b) - getWR(a));
                 const t1 = [], t2 = [];
-                pool.forEach((p) => {
+                pool.forEach(p => {
                     const s1 = t1.filter(m => p.past_teammates?.includes(m.name)).length;
                     const s2 = t2.filter(m => p.past_teammates?.includes(m.name)).length;
                     if(t1.length < size && (t2.length === size || s1 <= s2)) t1.push(p); else t2.push(p);
@@ -106,9 +106,9 @@
             await batch.commit();
         };
 
-        // --- フィードバック送受信 ---
+        // --- 通報・意見・閲覧システム ---
         window.openModal = (name, type) => {
-            targetPlayer = name;
+            targetPlayer = name; // ターゲットを保存
             document.getElementById('modalTitle').innerText = `${name} さんへの${type}`;
             document.getElementById('modalType').value = type;
             const select = document.getElementById('reasonSelect');
@@ -140,13 +140,13 @@
             if (await verifyUser(name)) {
                 const q = query(collection(db, "feedbacks"), where("target", "==", name), orderBy("timestamp", "desc"));
                 const snap = await getDocs(q);
-                let html = `<h4 class="text-yellow-500 font-bold mb-4 border-b border-yellow-500/30 pb-1 italic uppercase text-xs">${name} へのアドバイス</h4>`;
+                let html = `<h4 class="text-yellow-500 font-bold mb-4 border-b border-yellow-500/30 pb-1 italic uppercase text-[10px]">${name} へのアドバイス</h4>`;
                 snap.forEach(doc => {
                     const d = doc.data();
                     const date = d.timestamp ? d.timestamp.toDate().toLocaleString() : "---";
-                    html += `<div class="bg-slate-900 p-3 rounded-lg mb-3 border-l-4 border-blue-500 shadow-inner">
-                                <div class="flex justify-between text-[9px] text-slate-400 mb-1 font-bold"><span>【${d.category}】</span><span>${date}</span></div>
-                                <p class="text-xs text-slate-100 leading-relaxed font-medium">${d.comment}</p>
+                    html += `<div class="bg-slate-900 p-3 rounded-lg mb-3 border-l-4 border-blue-500 shadow">
+                                <div class="flex justify-between text-[8px] text-slate-400 mb-1 font-bold"><span>【${d.category}】</span><span>${date}</span></div>
+                                <p class="text-[11px] text-slate-100 leading-relaxed font-medium">${d.comment}</p>
                              </div>`;
                 });
                 document.getElementById('feedbackContent').innerHTML = html;
@@ -156,15 +156,13 @@
 
         window.closeViewModal = () => document.getElementById('viewModal').classList.add('hidden');
 
-        // --- リアルタイム監視 ---
-        // 意見の数を監視するリスナー
-        onSnapshot(collection(db, "feedbacks"), (snapshot) => {
+        // --- リアルタイム反映 ---
+        onSnapshot(collection(db, "feedbacks"), (snap) => {
             feedbackCounts = {};
-            snapshot.forEach(doc => {
-                const target = doc.data().target;
-                feedbackCounts[target] = (feedbackCounts[target] || 0) + 1;
+            snap.forEach(doc => {
+                const t = doc.data().target;
+                feedbackCounts[t] = (feedbackCounts[t] || 0) + 1;
             });
-            // 描画を強制アップデート（既にsnapshotが走っている場合は不要ですが、整合性のため）
         });
 
         onSnapshot(query(collection(db, "users"), orderBy("score", "desc")), (snapshot) => {
@@ -172,16 +170,14 @@
             const bL = document.getElementById('blueTeam');
             const rL = document.getElementById('redTeam');
             list.innerHTML = ""; bL.innerHTML = ""; rL.innerHTML = "";
-            
             snapshot.forEach((doc) => {
                 const data = doc.data();
                 const wr = data.matches > 0 ? ((data.wins / data.matches) * 100).toFixed(1) : "0.0";
-                
-                // 意見の有無を確認
                 const count = feedbackCounts[data.name] || 0;
+                
                 const feedbackBtnHtml = count > 0 
-                    ? `<button onclick="viewMyFeedback('${data.name}')" class="text-[7px] bg-blue-600 text-white px-2 py-0.5 rounded shadow-sm hover:bg-blue-500 ml-2 font-bold animate-pulse">📩 意見 (${count}件)</button>`
-                    : `<button class="text-[7px] bg-slate-800 text-slate-500 px-2 py-0.5 rounded ml-2 cursor-not-allowed border border-slate-700 font-bold">📩 届いていません</button>`;
+                    ? `<button onclick="viewMyFeedback('${data.name}')" class="text-[7px] bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-blue-500 ml-2 font-bold ring-1 ring-blue-400/50">📩 意見 (${count}件)</button>`
+                    : `<button class="text-[7px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded ml-2 cursor-not-allowed border border-slate-700 font-bold tracking-tighter opacity-60">📩 届いていません</button>`;
 
                 const card = `<li class="bg-slate-700 p-2 rounded text-[10px] mb-1 font-bold flex justify-between shadow"><span>${data.name}</span><span class="opacity-40 text-[7px] border border-white/20 px-1 rounded uppercase">${data.role}</span></li>`;
                 if(data.team === 'blue') bL.innerHTML += card; else if(data.team === 'red') rL.innerHTML += card;
@@ -189,7 +185,6 @@
                 const rankLi = document.createElement('li');
                 rankLi.className = "flex justify-between items-center border-b border-slate-800 py-2";
                 let opts = ROLES.map(r => `<option value="${r}" ${data.role === r ? 'selected' : ''}>${r}</option>`).join('');
-                
                 rankLi.innerHTML = `
                     <div class="flex items-center gap-2">
                         <input type="checkbox" ${data.active ? 'checked' : ''} onchange="toggleActive('${data.name}', ${data.active})" class="w-4 h-4 accent-yellow-500 cursor-pointer">
@@ -206,7 +201,7 @@
                             </div>
                         </div>
                     </div>
-                    <span class="text-yellow-500 font-mono text-xs font-black italic">${data.score}pt</span>
+                    <span class="text-yellow-500 font-mono text-xs font-black italic tracking-tighter">${data.score}pt</span>
                 `;
                 list.appendChild(rankLi);
             });
@@ -215,7 +210,7 @@
 </head>
 <body class="bg-slate-900 text-white p-4 font-sans max-w-md mx-auto min-h-screen">
     <header class="text-center mb-4">
-        <h1 class="text-2xl font-black text-yellow-500 italic tracking-tighter uppercase">Unite Feedback Hub</h1>
+        <h1 class="text-2xl font-black text-yellow-500 italic tracking-tighter uppercase">Unite Pro Hub</h1>
     </header>
     
     <div class="bg-slate-800 p-4 rounded-xl mb-4 border border-slate-700 shadow-xl">
@@ -229,14 +224,14 @@
             <option value="アタック">アタック</option>
             <option value="サポートタンク">サポートタンク</option>
         </select>
-        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg uppercase font-bold">Register Now</button>
+        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg uppercase">Entry Match</button>
     </div>
 
     <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700">
-        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200 uppercase">Generate 2-1-2 Match</button>
+        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200 uppercase">Generate Match</button>
         <div class="flex gap-2">
-            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Blue Win</button>
-            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Red Win</button>
+            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Blue Winner</button>
+            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Red Winner</button>
         </div>
     </div>
 
@@ -252,7 +247,7 @@
     </div>
 
     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50 shadow-inner">
-        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic border-b border-slate-700 pb-2">Waiting List / Stats</h2>
+        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic border-b border-slate-700 pb-2">Player Stats & Feedback</h2>
         <ul id="ranking" class="space-y-1"></ul>
     </div>
 
@@ -263,17 +258,16 @@
             <select id="reasonSelect" class="w-full p-2 rounded bg-white text-black font-bold text-xs mb-4 outline-none"></select>
             <textarea id="freeWord" class="w-full p-2 rounded bg-slate-900 text-white text-xs mb-4 h-24 outline-none border border-slate-700 focus:border-yellow-500" placeholder="内容を入力してください..."></textarea>
             <div class="flex gap-2">
-                <button onclick="closeModal()" class="flex-1 bg-slate-700 py-2 rounded font-bold text-xs">キャンセル</button>
-                <button onclick="submitFeedback()" class="flex-1 bg-yellow-500 py-2 rounded text-black font-black text-xs">送信</button>
+                <button onclick="closeModal()" class="flex-1 bg-slate-700 py-2 rounded font-bold text-xs uppercase">戻る</button>
+                <button onclick="submitFeedback()" class="flex-1 bg-yellow-500 py-2 rounded text-black font-black text-xs uppercase">送信</button>
             </div>
         </div>
     </div>
 
     <div id="viewModal" class="fixed inset-0 bg-black/95 flex items-center justify-center p-4 hidden z-50">
         <div class="bg-slate-800 w-full max-w-sm p-6 rounded-2xl border border-slate-600 shadow-2xl flex flex-col max-h-[80vh]">
-            <div id="feedbackContent" class="overflow-y-auto flex-1 pr-2">
-                </div>
-            <button onclick="closeViewModal()" class="mt-4 w-full bg-slate-700 py-3 rounded-lg font-black text-xs uppercase tracking-widest shadow-lg">閉じる</button>
+            <div id="feedbackContent" class="overflow-y-auto flex-1 pr-1 custom-scrollbar"></div>
+            <button onclick="closeViewModal()" class="mt-4 w-full bg-slate-700 py-3 rounded-lg font-black text-xs uppercase shadow-lg">閉じる</button>
         </div>
     </div>
 </body>
