@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ユナイト・チェック抽選システム</title>
+    <title>ユナイト・チェック限定マッチング</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -28,49 +28,45 @@
             return input === ADMIN_PASSWORD;
         };
 
-        // --- エントリー処理 ---
         window.joinEntry = async () => {
             const name = document.getElementById('userName').value.trim();
             const role = document.getElementById('userRole').value;
             if(!name) return alert("名前を入力してね！");
-            
-            await setDoc(doc(db, "users", name), { 
-                name, role, score: increment(0), team: "waiting", active: true 
-            }, { merge: true });
-            
+            await setDoc(doc(db, "users", name), { name, role, score: increment(0), team: "waiting", active: true }, { merge: true });
             document.getElementById('status').innerText = `【エントリー済】${name}`;
             localStorage.setItem('myUniteName', name);
         };
 
-        // --- チェックボックスの切り替え (本人または管理者が操作) ---
         window.toggleActive = async (name, currentStatus) => {
             await updateDoc(doc(db, "users", name), { active: !currentStatus });
         };
 
-        // --- チェックが付いている人からランダムマッチング ---
+        // --- 【修正】チェック済みの人"だけ"から最大10名選出 ---
         window.makeMatch = async () => {
             if(!checkPass()) return;
             const querySnapshot = await getDocs(collection(db, "users"));
-            // チェック(active)が入っているプレイヤーのみ抽出
-            let activePlayers = querySnapshot.docs
+            
+            // チェックが入っている人だけをリスト化
+            let activeCandidates = querySnapshot.docs
                 .map(d => ({id: d.id, ...d.data()}))
                 .filter(p => p.active === true);
             
-            if(activePlayers.length < 10) return alert("チェック済みの人があと" + (10 - activePlayers.length) + "人足りません！");
+            if(activeCandidates.length === 0) return alert("チェックが入っている人がいません！");
 
-            const shuffled = activePlayers.sort(() => 0.5 - Math.random()).slice(0, 10);
+            // シャッフルして最大10名を取り出す
+            const selectedPlayers = activeCandidates.sort(() => 0.5 - Math.random()).slice(0, 10);
+            
             const batch = writeBatch(db);
-
-            shuffled.forEach((p, index) => {
-                const team = (index < 5) ? "blue" : "red";
+            selectedPlayers.forEach((p, index) => {
+                // 半分ずつに分ける (例: 10人なら5:5, 8人なら4:4)
+                const team = (index < selectedPlayers.length / 2) ? "blue" : "red";
                 batch.update(doc(db, "users", p.id), { team: team });
             });
 
             await batch.commit();
-            alert("チェック済みの人から10名選出しました！");
+            alert(`${selectedPlayers.length}名でマッチングを作成しました！`);
         };
 
-        // --- 勝敗反映（試合に出た人のチェックを外す） ---
         window.finishMatch = async (winner) => {
             if(!checkPass()) return;
             const querySnapshot = await getDocs(collection(db, "users"));
@@ -79,39 +75,29 @@
                 const data = userDoc.data();
                 if(data.team === 'blue' || data.team === 'red') {
                     const points = (data.team === winner) ? 5 : 2;
-                    // 加点し、チームを戻し、さらに「チェック(active)」を外す
-                    batch.update(doc(db, "users", userDoc.id), { 
-                        score: increment(points), 
-                        team: "waiting",
-                        active: false 
-                    });
+                    batch.update(doc(db, "users", userDoc.id), { score: increment(points), team: "waiting", active: false });
                 }
             });
             await batch.commit();
-            alert(winner + "の勝利！対戦した10人のチェックを外しました。");
+            alert("加点完了。対戦者のチェックを外しました。");
         };
 
         window.resetScores = async () => {
             if(!checkPass()) return;
-            if(!confirm("全員のスコアを0にしますか？")) return;
             const querySnapshot = await getDocs(collection(db, "users"));
             const batch = writeBatch(db);
-            querySnapshot.docs.forEach(userDoc => {
-                batch.update(doc(db, "users", userDoc.id), { score: 0 });
-            });
+            querySnapshot.docs.forEach(userDoc => batch.update(doc(db, "users", userDoc.id), { score: 0 }));
             await batch.commit();
         };
 
         window.deleteAllEntries = async () => {
             if(!checkPass()) return;
-            if(!confirm("全員のエントリーを削除しますか？")) return;
             const querySnapshot = await getDocs(collection(db, "users"));
             const batch = writeBatch(db);
             querySnapshot.docs.forEach(userDoc => batch.delete(doc(db, "users", userDoc.id)));
             await batch.commit();
         };
 
-        // --- 画面表示 ---
         onSnapshot(query(collection(db, "users"), orderBy("score", "desc")), (snapshot) => {
             const list = document.getElementById('ranking');
             const blueList = document.getElementById('blueTeam');
@@ -120,7 +106,7 @@
 
             snapshot.forEach((doc) => {
                 const data = doc.data();
-                const card = `<li class="bg-slate-700 p-2 rounded text-sm mb-1 font-bold">${data.name} <span class="text-[9px] opacity-60">${data.role}</span></li>`;
+                const card = `<li class="bg-slate-700 p-2 rounded text-[11px] mb-1 font-bold flex justify-between"><span>${data.name}</span><span class="opacity-50 text-[9px]">${data.role}</span></li>`;
                 
                 if(data.team === 'blue') blueList.innerHTML += card;
                 else if(data.team === 'red') redList.innerHTML += card;
@@ -131,9 +117,9 @@
                     <div class="flex items-center gap-3">
                         <input type="checkbox" ${data.active ? 'checked' : ''} 
                             onchange="toggleActive('${data.name}', ${data.active})"
-                            class="w-4 h-4 accent-yellow-500">
+                            class="w-5 h-5 accent-yellow-500 cursor-pointer">
                         <div>
-                            <div class="text-sm font-bold ${data.active ? 'text-white' : 'text-gray-500'}">${data.name}</div>
+                            <div class="text-sm font-bold ${data.active ? 'text-white' : 'text-gray-600'}">${data.name}</div>
                             <div class="text-[9px] text-gray-500">${data.role}</div>
                         </div>
                     </div>
@@ -150,7 +136,7 @@
     </script>
 </head>
 <body class="bg-slate-900 text-white p-4 font-sans max-w-md mx-auto min-h-screen">
-    <h1 class="text-2xl font-black text-center mb-4 text-yellow-500 italic">UNITE CHECK-IN</h1>
+    <h1 class="text-2xl font-black text-center mb-4 text-yellow-500 italic">UNITE MATCHMAKER</h1>
     
     <div class="bg-slate-800 p-4 rounded-xl mb-4 border border-slate-700">
         <input id="userName" type="text" placeholder="名前" class="w-full p-2 rounded text-black mb-2 font-bold outline-none text-sm">
@@ -160,35 +146,35 @@
             <option value="アタック">アタック</option>
             <option value="サポートタンク">サポートタンク</option>
         </select>
-        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-3 rounded-xl font-black text-sm">エントリー（自動チェックON）</button>
+        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-3 rounded-xl font-black text-sm active:scale-95 transition">エントリー</button>
         <p id="status" class="mt-2 text-center text-xs text-yellow-500 h-4"></p>
     </div>
 
-    <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700">
-        <button onclick="makeMatch()" class="w-full bg-white text-black py-2 rounded font-black text-xs mb-3 shadow-lg">チェック済みの人から10名抽選</button>
+    <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700 shadow-2xl">
+        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-xs mb-3 shadow-lg active:bg-gray-200">チェック済みの人から最大10名抽選</button>
         <div class="flex gap-2">
-            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded text-[10px] font-bold">青勝利(10人のチェック外す)</button>
-            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded text-[10px] font-bold">赤勝利(10人のチェック外す)</button>
+            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-3 rounded font-bold text-[10px]">青勝利(チェック外す)</button>
+            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-3 rounded font-bold text-[10px]">赤勝利(チェック外す)</button>
         </div>
-        <div class="flex gap-2 mt-3 pt-3 border-t border-slate-700">
-            <button onclick="resetScores()" class="flex-1 text-[8px] text-slate-500">スコア0</button>
-            <button onclick="deleteAllEntries()" class="flex-1 text-[8px] text-slate-500">全員削除</button>
+        <div class="flex gap-4 mt-4 pt-3 border-t border-slate-700 justify-center">
+            <button onclick="resetScores()" class="text-[9px] text-slate-500 hover:text-white">スコア0</button>
+            <button onclick="deleteAllEntries()" class="text-[9px] text-slate-500 hover:text-white">全員削除</button>
         </div>
     </div>
 
     <div class="grid grid-cols-2 gap-4 mb-6">
-        <div class="bg-blue-900/20 p-2 rounded-lg border border-blue-500/30 min-h-[60px]">
-            <h3 class="text-blue-400 font-black text-[9px] mb-1 text-center italic text-shadow">BLUE</h3>
-            <ul id="blueTeam"></ul>
+        <div class="bg-blue-900/20 p-2 rounded-lg border border-blue-500/30">
+            <h3 class="text-blue-400 font-black text-[9px] mb-2 text-center italic">BLUE TEAM</h3>
+            <ul id="blueTeam" class="min-h-[50px]"></ul>
         </div>
-        <div class="bg-red-900/20 p-2 rounded-lg border border-red-500/30 min-h-[60px]">
-            <h3 class="text-red-400 font-black text-[9px] mb-1 text-center italic text-shadow">RED</h3>
-            <ul id="redTeam"></ul>
+        <div class="bg-red-900/20 p-2 rounded-lg border border-red-500/30">
+            <h3 class="text-red-400 font-black text-[9px] mb-2 text-center italic">RED TEAM</h3>
+            <ul id="redTeam" class="min-h-[50px]"></ul>
         </div>
     </div>
 
     <div class="bg-slate-800 p-4 rounded-xl">
-        <h2 class="text-[10px] font-black mb-3 text-slate-400 uppercase tracking-widest">Player List (Check to Match)</h2>
+        <h2 class="text-[10px] font-black mb-3 text-slate-400 uppercase tracking-widest">Player List (Check to Play)</h2>
         <ul id="ranking" class="space-y-1"></ul>
     </div>
 </body>
