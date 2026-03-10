@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UNITE 2-1-2 SELECTOR</title>
+    <title>UNITE HUB 2-1-2 PRO</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, updateDoc, increment, collection, onSnapshot, query, orderBy, getDocs, writeBatch, arrayUnion, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, increment, collection, onSnapshot, query, orderBy, getDocs, writeBatch, arrayUnion, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyC1rcomHIoitizq2NSRMsDwgDyQYksYANk",
@@ -24,7 +24,10 @@
         const ADMIN_PASSWORD = "unite"; 
         const ROLES = ["希望なし", "スピードバランス", "アタック", "サポートタンク"];
 
-        // 共通：パスワード認証
+        // 管理者認証
+        const checkAdmin = () => prompt("管理者パスワードを入力してください") === ADMIN_PASSWORD;
+
+        // プレイヤー認証 (ロール変更用)
         const verifyUser = async (name) => {
             const pass = prompt(`${name} さんの4桁パスワードを入力してください`);
             if (!pass) return false;
@@ -45,29 +48,23 @@
                 team: "waiting", active: true, past_teammates: [] 
             }, { merge: true });
             
-            document.getElementById('status').innerText = `【エントリー完了】${name}`;
+            document.getElementById('status').innerText = `エントリー完了！`;
             localStorage.setItem('myUniteName', name);
         };
 
+        // 【修正】チェックボックスはパスワード不要
         window.toggleActive = async (name, currentStatus) => {
-            if (await verifyUser(name)) {
-                await updateDoc(doc(db, "users", name), { active: !currentStatus });
-            }
+            await updateDoc(doc(db, "users", name), { active: !currentStatus });
         };
 
-        // --- プルダウン変更時の処理 ---
         window.changeRole = async (name, newRole) => {
             if (await verifyUser(name)) {
                 await updateDoc(doc(db, "users", name), { role: newRole });
-            } else {
-                // 認証失敗時は表示を元に戻す（再描画で自動的に戻ります）
             }
         };
 
         window.makeMatch = async () => {
-            const input = prompt("管理者パスワード");
-            if(input !== ADMIN_PASSWORD) return;
-
+            if(!checkAdmin()) return;
             const snap = await getDocs(collection(db, "users"));
             const players = snap.docs.map(d => ({id: d.id, ...d.data()})).filter(p => p.active);
 
@@ -86,17 +83,17 @@
             while(selectedT.length < 4 && remainingW.length > 0) selectedT.push(remainingW.shift());
 
             if(selectedS.length < 4 || selectedA.length < 2 || selectedT.length < 4) {
-                return alert(`構成エラー: スピード(4), アタック(2), タンク(4) が必要です。`);
+                return alert(`構成エラー: 2-1-2 (計10名) の条件を満たせません。\n現在のチェック人数: ${players.length}`);
             }
 
             const getWinRate = p => p.matches > 0 ? p.wins / p.matches : 0.5;
-            const splitBalanced = (pool, sizePerTeam) => {
+            const splitBalanced = (pool, size) => {
                 pool.sort((a, b) => getWinRate(b) - getWinRate(a));
                 const t1 = [], t2 = [];
                 pool.forEach((p, i) => {
-                    const score1 = t1.filter(m => p.past_teammates?.includes(m.name)).length;
-                    const score2 = t2.filter(m => p.past_teammates?.includes(m.name)).length;
-                    if(t1.length < sizePerTeam && (t2.length === sizePerTeam || score1 <= score2)) t1.push(p);
+                    const s1 = t1.filter(m => p.past_teammates?.includes(m.name)).length;
+                    const s2 = t2.filter(m => p.past_teammates?.includes(m.name)).length;
+                    if(t1.length < size && (t2.length === size || s1 <= s2)) t1.push(p);
                     else t2.push(p);
                 });
                 return [t1, t2];
@@ -115,8 +112,7 @@
         };
 
         window.finishMatch = async (winner) => {
-            const input = prompt("管理者パスワード");
-            if(input !== ADMIN_PASSWORD) return;
+            if(!checkAdmin()) return;
             const snap = await getDocs(collection(db, "users"));
             const batch = writeBatch(db);
             const blue = [], red = [];
@@ -131,6 +127,28 @@
                 });
             });
             await batch.commit();
+            alert("集計完了！対戦者のチェックを外しました。");
+        };
+
+        // --- 管理用リセットボタン ---
+        window.resetAllScores = async () => {
+            if(!checkAdmin()) return;
+            if(!confirm("全員のスコア・勝率をリセットしますか？")) return;
+            const snap = await getDocs(collection(db, "users"));
+            const batch = writeBatch(db);
+            snap.docs.forEach(d => batch.update(doc(db, "users", d.id), { score: 0, wins: 0, matches: 0, past_teammates: [] }));
+            await batch.commit();
+            alert("リセット完了");
+        };
+
+        window.deleteAllUsers = async () => {
+            if(!checkAdmin()) return;
+            if(!confirm("エントリー全員を削除しますか？")) return;
+            const snap = await getDocs(collection(db, "users"));
+            const batch = writeBatch(db);
+            snap.docs.forEach(d => batch.delete(doc(db, "users", d.id)));
+            await batch.commit();
+            alert("全員削除完了");
         };
 
         onSnapshot(query(collection(db, "users"), orderBy("score", "desc")), (snapshot) => {
@@ -142,17 +160,12 @@
             snapshot.forEach((doc) => {
                 const data = doc.data();
                 const winRate = data.matches > 0 ? ((data.wins / data.matches) * 100).toFixed(1) : "0.0";
+                const item = `<li class="bg-slate-700 p-2 rounded text-[10px] mb-1 font-bold flex justify-between shadow"><span>${data.name}</span><span class="opacity-40 text-[7px] border border-white/20 px-1 rounded uppercase">${data.role}</span></li>`;
+                if(data.team === 'blue') blueList.innerHTML += item;
+                else if(data.team === 'red') redList.innerHTML += item;
                 
-                // チーム表示用カード
-                const card = `<li class="bg-slate-700 p-2 rounded text-[10px] mb-1 font-bold flex justify-between shadow"><span>${data.name}</span><span class="opacity-40 text-[7px] border border-white/20 px-1 rounded">${data.role}</span></li>`;
-                if(data.team === 'blue') blueList.innerHTML += card;
-                else if(data.team === 'red') redList.innerHTML += card;
-                
-                // ランキング/プレイヤーリスト用行
                 const rankLi = document.createElement('li');
                 rankLi.className = "flex justify-between items-center border-b border-slate-800 py-2";
-                
-                // ロール用プルダウンのHTML生成
                 let roleOptions = ROLES.map(r => `<option value="${r}" ${data.role === r ? 'selected' : ''}>${r}</option>`).join('');
 
                 rankLi.innerHTML = `
@@ -161,15 +174,14 @@
                         <div>
                             <div class="text-xs font-bold ${data.active ? 'text-white' : 'text-gray-600'}">${data.name}</div>
                             <div class="flex gap-2 items-center">
-                                <select onchange="changeRole('${data.name}', this.value)" 
-                                        class="text-[8px] bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-slate-300 focus:outline-none focus:border-yellow-500">
+                                <select onchange="changeRole('${data.name}', this.value)" class="text-[8px] bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-slate-300 outline-none">
                                     ${roleOptions}
                                 </select>
-                                <span class="text-[7px] text-slate-500 font-bold">Win: ${winRate}%</span>
+                                <span class="text-[7px] text-slate-500 font-bold uppercase">W:${winRate}% (${data.wins}/${data.matches})</span>
                             </div>
                         </div>
                     </div>
-                    <span class="text-yellow-500 font-mono text-xs font-black italic">${data.score}<small class="text-[8px] ml-0.5">PT</small></span>
+                    <span class="text-yellow-500 font-mono text-xs font-black italic tracking-tighter">${data.score}pt</span>
                 `;
                 list.appendChild(rankLi);
             });
@@ -178,8 +190,10 @@
 </head>
 <body class="bg-slate-900 text-white p-4 font-sans max-w-md mx-auto min-h-screen">
     <header class="text-center mb-4">
-        <h1 class="text-2xl font-black text-yellow-500 italic tracking-tighter">UNITE HUB 2-1-2</h1>
-        <p class="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1 italic">Role Selection & Secure Access</p>
+        <h1 class="text-2xl font-black text-yellow-500 italic tracking-tighter uppercase">Unite Pro Matchmaker</h1>
+        <div class="flex justify-center gap-3 mt-1 text-slate-500 font-bold text-[8px] uppercase tracking-widest">
+            <span>Role 2-1-2</span><span>|</span><span>Balanced Winrate</span>
+        </div>
     </header>
     
     <div class="bg-slate-800 p-4 rounded-xl mb-4 border border-slate-700 shadow-xl">
@@ -193,31 +207,35 @@
             <option value="アタック">アタック</option>
             <option value="サポートタンク">サポートタンク</option>
         </select>
-        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg uppercase">Entry Match</button>
+        <button onclick="joinEntry()" class="w-full bg-yellow-500 text-black py-2 rounded-lg font-black text-xs active:scale-95 transition shadow-lg uppercase">Join Match</button>
         <p id="status" class="mt-2 text-center text-[10px] text-yellow-500 h-4 font-bold"></p>
     </div>
 
     <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700">
-        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200">2-1-2 バランスマッチ作成</button>
+        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-[10px] mb-3 shadow-lg active:bg-gray-200 uppercase">2-1-2 Generate Match</button>
         <div class="flex gap-2">
-            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded font-bold text-[9px] shadow-lg">BLUE WIN</button>
-            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded font-bold text-[9px] shadow-lg">RED WIN</button>
+            <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Blue Winner</button>
+            <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-2 rounded font-bold text-[9px] shadow-lg uppercase">Red Winner</button>
+        </div>
+        <div class="flex gap-4 mt-4 pt-3 border-t border-slate-700 justify-center">
+            <button onclick="resetAllScores()" class="text-[8px] text-slate-500 hover:text-red-400 uppercase font-bold">Score Reset</button>
+            <button onclick="deleteAllUsers()" class="text-[8px] text-slate-500 hover:text-red-400 uppercase font-bold">Clear All Players</button>
         </div>
     </div>
 
     <div class="grid grid-cols-2 gap-3 mb-6">
         <div class="bg-blue-900/40 p-2 rounded-lg border border-blue-500/50 min-h-[140px]">
-            <h2 class="text-blue-400 font-black text-[9px] mb-2 text-center italic border-b border-blue-500/30 pb-1 uppercase tracking-tighter">Team Blue (2-1-2)</h2>
+            <h2 class="text-blue-400 font-black text-[9px] mb-2 text-center italic border-b border-blue-500/30 pb-1 uppercase tracking-tighter">Team Blue</h2>
             <ul id="blueTeam"></ul>
         </div>
         <div class="bg-red-900/40 p-2 rounded-lg border border-red-500/50 min-h-[140px]">
-            <h2 class="text-red-400 font-black text-[9px] mb-2 text-center italic border-b border-red-500/30 pb-1 uppercase tracking-tighter">Team Red (2-1-2)</h2>
+            <h2 class="text-red-400 font-black text-[9px] mb-2 text-center italic border-b border-red-500/30 pb-1 uppercase tracking-tighter">Team Red</h2>
             <ul id="redTeam"></ul>
         </div>
     </div>
 
-    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
-        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic border-b border-slate-700 pb-2">Player Stats & Role Settings</h2>
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50 shadow-inner">
+        <h2 class="text-[9px] font-black mb-3 text-slate-400 uppercase tracking-widest text-center italic border-b border-slate-700 pb-2">Waiting List / Live Stats</h2>
         <ul id="ranking" class="space-y-1"></ul>
     </div>
 </body>
