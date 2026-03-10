@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>ポケモンユナイト スコア管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white p-5">
+    <div class="max-w-md mx-auto">
+        <h1 class="text-2xl font-bold text-center mb-6">🏆 ユナイト・スコア</h1>
+        
+        <div class="bg-slate-800 p-4 rounded-lg mb-6">
+            <input id="userName" type="text" placeholder="トレーナー名" class="w-full p-2 rounded text-black mb-2">
+            <div class="flex gap-2">
+                <button onclick="join('blue')" class="flex-1 bg-blue-600 p-2 rounded">青チーム参加</button>
+                <button onclick="join('red')" class="flex-1 bg-red-600 p-2 rounded">赤チーム参加</button>
+            </div>
+            <p id="status" class="mt-2 text-sm text-center text-gray-400">チームを選んでください</p>
+        </div>
+
+        <div class="border-t border-slate-700 pt-6">
+            <h2 class="text-center mb-4 text-gray-400 text-sm">【配信者操作エリア】</h2>
+            <div class="flex gap-2">
+                <button onclick="finishMatch('blue')" class="flex-1 bg-yellow-500 text-black font-bold p-3 rounded-xl">青の勝利！ (+5/+2)</button>
+                <button onclick="finishMatch('red')" class="flex-1 bg-yellow-500 text-black font-bold p-3 rounded-xl">赤の勝利！ (+5/+2)</button>
+            </div>
+        </div>
+
+        <div class="mt-8">
+            <h2 class="text-xl font-bold mb-4">現在のランキング</h2>
+            <ul id="ranking" class="space-y-2">
+                </ul>
+        </div>
+    </div>
+
+    <script>
+        // ※この部分は後で「Firebase」というデータベースに置き換えます
+        let users = [];
+        let myTeam = "";
+
+        function join(team) {
+            const name = document.getElementById('userName').value;
+            if(!name) return alert("名前を入れてね！");
+            myTeam = team;
+            document.getElementById('status').innerText = `${name}さんは ${team === 'blue' ? '青' : '赤'}チームです`;
+            // 本来はここでDBに保存
+        }
+
+        function finishMatch(winner) {
+            alert(winner + "チームの勝ちとして計算します（※DB設定後に連動します）");
+        }
+    </script>
+</body>
+</html>
