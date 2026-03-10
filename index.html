@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ユナイト・10人限定マッチング</title>
+    <title>ユナイト・ロール切替マッチング</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -23,6 +23,8 @@
         const db = getFirestore(app);
         const ADMIN_PASSWORD = "unite"; 
 
+        const ROLES = ["希望なし", "スピードバランス", "アタック", "サポートタンク"];
+
         const checkPass = () => {
             const input = prompt("管理者パスワードを入力してください");
             return input === ADMIN_PASSWORD;
@@ -41,29 +43,27 @@
             await updateDoc(doc(db, "users", name), { active: !currentStatus });
         };
 
-        // --- 【修正】ちょうど10人の時だけ5vs5を作るロジック ---
+        // --- ロールを順番に切り替える処理 ---
+        window.cycleRole = async (name, currentRole) => {
+            let currentIndex = ROLES.indexOf(currentRole);
+            if (currentIndex === -1) currentIndex = 0;
+            const nextIndex = (currentIndex + 1) % ROLES.length;
+            await updateDoc(doc(db, "users", name), { role: ROLES[nextIndex] });
+        };
+
         window.makeMatch = async () => {
             if(!checkPass()) return;
             const querySnapshot = await getDocs(collection(db, "users"));
-            
-            // 全プレイヤーを取得
             let allDocs = querySnapshot.docs.map(d => ({id: d.id, ...d.data()}));
-            // チェックが入っている人だけを抽出
             let activeCandidates = allDocs.filter(p => p.active === true);
             
-            // 10人ちょうどじゃない場合はエラー
             if(activeCandidates.length !== 10) {
-                return alert("現在 " + activeCandidates.length + " 人にチェックが入っています。\n5vs5を作るには「ちょうど10人」にチェックを入れてください！\n(多い場合は外して、少ない場合は増やしてください)");
+                return alert("現在 " + activeCandidates.length + " 人にチェックが入っています。10人ちょうどにしてください。");
             }
 
             const batch = writeBatch(db);
+            allDocs.forEach(p => batch.update(doc(db, "users", p.id), { team: "waiting" }));
 
-            // まず、全プレイヤーのチームを一旦リセット（念のため）
-            allDocs.forEach(p => {
-                batch.update(doc(db, "users", p.id), { team: "waiting" });
-            });
-
-            // シャッフルして5vs5に振り分け
             const shuffled = activeCandidates.sort(() => 0.5 - Math.random());
             shuffled.forEach((p, index) => {
                 const team = (index < 5) ? "blue" : "red";
@@ -71,7 +71,7 @@
             });
 
             await batch.commit();
-            alert("10名を5vs5に振り分けました！");
+            alert("マッチング完了！");
         };
 
         window.finishMatch = async (winner) => {
@@ -86,7 +86,6 @@
                 }
             });
             await batch.commit();
-            alert("ポイント加算完了。対戦者のチェックを外しました。");
         };
 
         window.resetScores = async () => {
@@ -123,6 +122,8 @@
                 
                 const rankLi = document.createElement('li');
                 rankLi.className = "flex justify-between items-center border-b border-slate-800 py-2";
+                
+                // ロール表示部分をボタン化
                 rankLi.innerHTML = `
                     <div class="flex items-center gap-3">
                         <input type="checkbox" ${data.active ? 'checked' : ''} 
@@ -130,7 +131,10 @@
                             class="w-5 h-5 accent-yellow-500 cursor-pointer">
                         <div>
                             <div class="text-sm font-bold ${data.active ? 'text-white' : 'text-gray-600'}">${data.name}</div>
-                            <div class="text-[9px] text-gray-500">${data.role}</div>
+                            <button onclick="cycleRole('${data.name}', '${data.role}')" 
+                                    class="text-[9px] px-1.5 py-0.5 rounded border border-slate-600 bg-slate-800 text-slate-400 hover:text-yellow-500 hover:border-yellow-500 transition-colors">
+                                ${data.role} 🔄
+                            </button>
                         </div>
                     </div>
                     <span class="text-yellow-500 font-mono text-sm">${data.score}pt</span>
@@ -146,7 +150,7 @@
     </script>
 </head>
 <body class="bg-slate-900 text-white p-4 font-sans max-w-md mx-auto min-h-screen">
-    <h1 class="text-2xl font-black text-center mb-4 text-yellow-500 italic tracking-tight">UNITE 5vs5 ONLY</h1>
+    <h1 class="text-2xl font-black text-center mb-4 text-yellow-500 italic">UNITE HUB</h1>
     
     <div class="bg-slate-800 p-4 rounded-xl mb-4 border border-slate-700 shadow-lg">
         <input id="userName" type="text" placeholder="名前" class="w-full p-2 rounded text-black mb-2 font-bold outline-none text-sm">
@@ -160,8 +164,8 @@
         <p id="status" class="mt-2 text-center text-[10px] text-yellow-500 h-4"></p>
     </div>
 
-    <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700 shadow-2xl">
-        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-xs mb-3 shadow-lg active:bg-gray-200">10名ジャストで5vs5抽選</button>
+    <div class="bg-slate-800/80 p-4 rounded-xl mb-4 border-2 border-slate-700">
+        <button onclick="makeMatch()" class="w-full bg-white text-black py-3 rounded-lg font-black text-xs mb-3 shadow-lg active:bg-gray-200 uppercase">10 People Match</button>
         <div class="flex gap-2">
             <button onclick="finishMatch('blue')" class="flex-1 bg-blue-600 p-3 rounded font-bold text-[10px] shadow-lg">青勝利</button>
             <button onclick="finishMatch('red')" class="flex-1 bg-red-600 p-3 rounded font-bold text-[10px] shadow-lg">赤勝利</button>
@@ -174,17 +178,17 @@
 
     <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="bg-blue-900/40 p-2 rounded-lg border border-blue-500/50">
-            <h3 class="text-blue-400 font-black text-[10px] mb-2 text-center italic tracking-widest">BLUE TEAM</h3>
+            <h3 class="text-blue-400 font-black text-[10px] mb-2 text-center italic">BLUE TEAM</h3>
             <ul id="blueTeam" class="min-h-[120px]"></ul>
         </div>
         <div class="bg-red-900/40 p-2 rounded-lg border border-red-500/50">
-            <h3 class="text-red-400 font-black text-[10px] mb-2 text-center italic tracking-widest">RED TEAM</h3>
+            <h3 class="text-red-400 font-black text-[10px] mb-2 text-center italic">RED TEAM</h3>
             <ul id="redTeam" class="min-h-[120px]"></ul>
         </div>
     </div>
 
-    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
-        <h2 class="text-[10px] font-black mb-3 text-slate-400 uppercase tracking-widest">Player List / Check 10 People</h2>
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50 shadow-inner">
+        <h2 class="text-[10px] font-black mb-3 text-slate-400 uppercase tracking-widest">Player List / Click Role to Change</h2>
         <ul id="ranking" class="space-y-1"></ul>
     </div>
 </body>
